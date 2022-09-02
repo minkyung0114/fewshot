@@ -12,8 +12,8 @@ from torch.utils.data import DataLoader
 import numpy as np
 from pathlib import Path
 
-ckpt_path ='../FEWshot/model_1000.pth'
-save_imgpath ='../FEWshot/'
+ckpt_path ='../FEWshot/cutmix/model_999.pth'
+save_imgpath ='../FEWshot/cutmix/'
 #print(f"ckpt_path:{ckpt_path}")
 is_cuda = False
 DEVICE = torch.device('cpu')
@@ -38,11 +38,11 @@ train_acc = checkpoint['train_acc']
 val_acc = checkpoint['val_acc']
 epoch =checkpoint['epoch']
 #print(f"epoch:{epoch}")
-print(f"train_acc:{train_acc[-1]}")
-print(f"val_acc:{val_acc[-1]}")
 print(f"train_loss:{train_loss[-1]}")
 print(f"val_loss:{val_loss[-1]}")
-
+print(f"train_acc:{train_acc[-1]}")
+print(f"val_acc:{val_acc[-1]}")
+'''
 plt.figure(figsize=(5,5))
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
@@ -63,8 +63,7 @@ plt.legend()
 plt.savefig(os.path.join(save_imgpath,f"fewshot_acc.png"),dpi=100)
 plt.show()
 
-
-
+'''
 #print(model)
 transformer = transforms.Compose([ transforms.ToPILImage(),
                                    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
@@ -79,7 +78,6 @@ index =15
 def recognize_face(dataset, index, model, device):
 
     val_dataset = dataset(data_dir, phase="val")
-    #print(val_dataset.__getitem__(0))
     faceA,faceB,label = val_dataset[index]
     tensor_faceA = transformer(faceA).to(device) # C,H,W (1,100,100)
     tensor_faceB = transformer(faceB).to(device)
@@ -105,8 +103,8 @@ plt.show()
 
 plt.figure(figsize=(10,10))
 '''
-'''
 
+'''
 for i in range(5):
     faceA, faceB, distance, output = recognize_face(Face_Dataset, index, model, DEVICE)
     plt.figure(figsize=(7, 4))
@@ -121,23 +119,73 @@ for i in range(5):
     plt.savefig(os.path.join(save_imgpath,f'output_{i}.png'), dpi=100)
     plt.show()
 
-
 '''
 
+'''
+class Face_Dataset():
+    def __init__(self, data_dir, transformer=None):
+        self.person_items = []
+        for (root,dirs, files) in os.walk(data_dir):
+            if len(files) > 0:
+                for file_name in files:
+                    self.person_items.append(os.path.join(root,file_name))
+
+        self.transformer = transformer
+
+    def __len__(self):
+        return len(self.person_items)
+
+    def __getitem__(self, idx):
+        face_path = self.person_items[idx]
+        face_image = cv2.imread(face_path,0)
+
+        if self.transformer:
+            face_image = self.transformer(face_image)
+        person_name = Path(face_path).parent.name
+        return face_image, person_name
 
 
-for i in range(5):
-    faceA, faceB, distance, output = recognize_face(Face_Dataset, index, model, DEVICE)
-    plt.figure(figsize=(7, 4))
-    plt.suptitle(f"{output} - Dissimilarity: {distance:.2f}")
-    plt.subplot(121)
-    plt.title("sample_imgA")
-    plt.imshow(faceA, cmap='gray')
-    plt.subplot(122)
-    plt.title("sample_imgB")
-    plt.imshow(faceB, cmap='gray')
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_imgpath,f'output_{i}.png'), dpi=100)
-    plt.show()
+
+def build_transformer(image_size=100):
+
+    transformer = transforms.Compose([ transforms.ToPILImage(),
+                                       transforms.Resize((100,100)),
+                                       transforms.ToTensor(),
+                                       transforms.Normalize((0.5), (0.5))
+                                       ])
+    return transformer
+
+transformer = build_transformer()
+dataset = Face_Dataset(data_dir, transformer=transformer)
+dataloader = DataLoader(dataset, shuffle=False, batch_size=1)
 
 
+all_images= []
+all_labels= []
+all_embeds=[]
+
+for idx, sample in enumerate(dataloader):
+    image = sample[0]
+    label = sample[1]
+
+    with torch.no_grad():
+        embed = model(image.to(DEVICE))
+
+    embed - embed.detach().cpu().numpy()
+
+    image = make_grid(image, normalize=True).permute(1,2,0)
+    image = cv2.resize(np.array(image),dsize=(80,80), interpolation=cv2.INTER_NEAREST)
+
+    all_images.append(image)
+    all_labels.append(label)
+    all_embeds.append(embed)
+
+all_images = torch.tensor(np.moveaxis(np.stack(all_images, axis=0), 3, 1))
+all_embeds = torch.tensor(np.stack(all_embeds, axis=0).squeeze(1))
+#all_labels = np.stack(all_labels, axis=1).squeeze(0)
+all_labels = np.concatenate(all_labels).tolist()
+
+writer.add_embedding(all_embeds, label_img=all_images, metadata=all_labels)
+writer.close()
+
+'''
